@@ -3,6 +3,7 @@ import axios from 'axios';
 let _instance = null;
 let _authToken = null;
 let _baseUrl = null;
+const _tokenListeners = new Set();
 
 function _createInstance(baseURL){
   const client = axios.create({ baseURL:baseURL });
@@ -23,6 +24,7 @@ async function _authenticate(username,password){
   const response = await _instance.get('/authenticate',{headers:headers});
   if(response.status == 200 && !response.data.error){
     _setAuthToken(response.data.token);
+    _notifyTokenListeners(response.data.token);
     return response.data.token;
   }
   throw response.data;
@@ -38,6 +40,16 @@ async function _isTokenValid(auth_token){
   }
   throw response.data;
 }
+function _notifyTokenListeners(token){
+  for(const cb of _tokenListeners){
+    try{
+      cb(token);
+    }catch(err){
+      console.warn('Error in token listener:',err);
+    }
+  }
+}
+
 
 const apiClient = {
   init(baseURL = process.env.OD_ACCOUNTS_BASE_URL){
@@ -51,6 +63,11 @@ const apiClient = {
       _baseUrl = baseURL;
       _instance = _createInstance(_baseUrl);
     }
+  },
+  onTokenUpdate(callback){
+    _tokenListeners.add(callback);
+    if(_authToken) callback(_authToken);
+    return () => _tokenListeners.delete(callback); //allow unsubscription
   },
   async authenticate(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
     if(!username || !password){
