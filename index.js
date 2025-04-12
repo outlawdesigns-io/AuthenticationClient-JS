@@ -109,6 +109,7 @@ const apiClient = {
     _notifyTokenListeners(auth_token);
     _setAuthToken(auth_token);
   },
+  isTokenValid:_isTokenValid,
   get instance(){
     if(!_instance){
       throw new Error('API client not initialized. Call apiClient.init(baseURL) first.');
