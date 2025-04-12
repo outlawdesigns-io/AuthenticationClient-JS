@@ -3,6 +3,8 @@ import axios from 'axios';
 let _instance = null;
 let _authToken = null;
 let _baseUrl = null;
+let _refreshInProgress = false;
+let _refreshPromise = null;
 const _tokenListeners = new Set();
 
 function _createInstance(baseURL){
@@ -19,6 +21,9 @@ function _setAuthToken(token){
   }
 }
 async function _authenticate(username,password){
+  if(!username || !password){
+    throw new Error('Cannot authenticate without credentials.');
+  }
   if(!_instance) throw new Error('API client not instantiated with baseURL.');
   const headers = {'request_token':username, 'password':password};
   const response = await _instance.get('/authenticate',{headers:headers});
@@ -70,20 +75,32 @@ const apiClient = {
     return () => _tokenListeners.delete(callback); //allow unsubscription
   },
   async authenticate(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    if(!username || !password){
-      throw new Error('Cannot authenticate without credentials.');
-    }
     return await _authenticate(username,password);
   },
   async checkToken(auth_token,username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
     const validToken = await _isTokenValid(auth_token);
-    if(!username || !password){
-      throw new Error('Cannot authenticate without credentials.');
-    }
     if(!validToken){
       return await _authenticate(username,password);
     }
     return auth_token;
+  },
+  async refreshToken(){
+    if(_refreshInProgress){
+      return _refreshPromise;
+    }
+    _refreshInProgress = true;
+    _refreshPromise = (async ()=> {
+      try{
+        let newToken = _authenticate();
+        _authToken = newToken;
+        _notifyTokenListeners(_authToken);
+        return _authToken;
+      }finally{
+        _refreshInProgress = false;
+        _refreshPromise = null;
+      }
+    })();
+    return _refreshPromise;
   },
   getAuthToken(){
     return _authToken;
