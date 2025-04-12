@@ -106,6 +106,7 @@ const apiClient = {
     return _authToken;
   },
   setAuthToken(auth_token){
+    _notifyTokenListeners(auth_token);
     _setAuthToken(auth_token);
   },
   get instance(){
