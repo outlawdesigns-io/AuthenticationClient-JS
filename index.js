@@ -40,7 +40,7 @@ async function _isTokenValid(auth_token){
   const response = await _instance.get('/verify');
   if(response.status == 200 && !response.data.error){
     return true;
-  }else if(response.status == 200 && response.data.error && response.data.error.includes('Invalid Token')){
+  }else if(response.status == 200 && response.data.error && (response.data.error.includes('Invalid Token') || response.data.error.includes('Token Expired'))){
     return false;
   }
   throw response.data;
@@ -84,14 +84,14 @@ const apiClient = {
     }
     return auth_token;
   },
-  async refreshToken(){
+  async refreshToken(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
     if(_refreshInProgress){
       return _refreshPromise;
     }
     _refreshInProgress = true;
     _refreshPromise = (async ()=> {
       try{
-        let newToken = _authenticate();
+        let newToken = await _authenticate(username,password);
         _authToken = newToken;
         _notifyTokenListeners(_authToken);
         return _authToken;
