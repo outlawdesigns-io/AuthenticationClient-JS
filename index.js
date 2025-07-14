@@ -1,121 +1,73 @@
-import axios from 'axios';
+import * as client from 'openid-client';
 
-let _instance = null;
-let _authToken = null;
-let _baseUrl = null;
-let _refreshInProgress = false;
-let _refreshPromise = null;
-const _tokenListeners = new Set();
+let config, tokenSet, onUpdateCallback;
 
-function _createInstance(baseURL){
-  const client = axios.create({ baseURL:baseURL });
-  if(_authToken){
-    client.defaults.headers.common['auth_token'] = _authToken;
-  }
-  return client;
+//implement logout() and refreshToken()
+//figure out why our letsencrypt cert gets rejected
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
+
+async function init(issuerUrl, clientId, clientSecret = null){
+  config = await client.discovery(
+    issuerUrl,
+    clientId,
+    clientSecret
+    //'$2a$10$4edhPeDnuDHe8APeG6bwz.n5cJUnkNmx39Eo2j.eVGSMHGrGG5Ts2'
+    //[ redirectUri ],
+    //['code'], //this probably needs to be parameterized
+  );
 }
-function _setAuthToken(token){
-  _authToken = token;
-  if(_instance){
-    _instance.defaults.headers.common['auth_token'] = _authToken;
+//user interactive sign-in
+async function authorizationCodeFlow(redirectUri, scope) {
+  if(!config){
+    throw new Error('call: init(issuerUrl, clientId, redirectUri)');
   }
-}
-async function _authenticate(username,password){
-  if(!username || !password){
-    throw new Error('Cannot authenticate without credentials.');
+  let codeVerifier = client.randomPKCECodeVerifier();
+  let codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
+  console.log('verifier', codeVerifier);
+  //let state;
+  let state = client.randomState();
+  let parameters = {
+    redirectUri,
+    scope,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state: state
   }
-  if(!_instance) throw new Error('API client not instantiated with baseURL.');
-  const headers = {'request_token':username, 'password':password};
-  const response = await _instance.get('/authenticate',{headers:headers});
-  if(response.status == 200 && !response.data.error){
-    _setAuthToken(response.data.token);
-    _notifyTokenListeners(response.data.token);
-    return response.data.token;
+  let redirectTo = client.buildAuthorizationUrl(config,parameters);
+  return {
+    redirectUri: redirectTo.href,
+    state: state,
+    codeVerifier: codeVerifier
   }
-  throw response.data;
-}
-async function _isTokenValid(auth_token){
-  if (!_instance) throw new Error('API client not instantiated with baseURL.');
-  _setAuthToken(auth_token);
-  const response = await _instance.get('/verify');
-  if(response.status == 200 && !response.data.error){
-    return true;
-  }else if(response.status == 200 && response.data.error && (response.data.error.includes('Invalid Token') || response.data.error.includes('Token Expired'))){
-    return false;
-  }
-  throw response.data;
-}
-function _notifyTokenListeners(token){
-  for(const cb of _tokenListeners){
-    try{
-      cb(token);
-    }catch(err){
-      console.warn('Error in token listener:',err);
-    }
-  }
+  // return redirectTo.href;
 }
 
-
-const apiClient = {
-  init(baseURL = process.env.OD_ACCOUNTS_BASE_URL){
-    if(_baseUrl && baseURL !== _baseUrl){
-      throw new Error(`API client already initialized with ${_baseUrl}`);
-    }
-    if(!baseURL){
-      throw new Error('API client cannot be initialized without baseURL');
-    }
-    if(!_instance){
-      _baseUrl = baseURL;
-      _instance = _createInstance(_baseUrl);
-    }
-  },
-  onTokenUpdate(callback){
-    _tokenListeners.add(callback);
-    if(_authToken) callback(_authToken);
-    return () => _tokenListeners.delete(callback); //allow unsubscription
-  },
-  async authenticate(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    return await _authenticate(username,password);
-  },
-  async checkToken(auth_token,username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    const validToken = await _isTokenValid(auth_token);
-    if(!validToken){
-      return await _authenticate(username,password);
-    }
-    return auth_token;
-  },
-  async refreshToken(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    if(_refreshInProgress){
-      return _refreshPromise;
-    }
-    _refreshInProgress = true;
-    _refreshPromise = (async ()=> {
-      try{
-        let newToken = await _authenticate(username,password);
-        _authToken = newToken;
-        _notifyTokenListeners(_authToken);
-        return _authToken;
-      }finally{
-        _refreshInProgress = false;
-        _refreshPromise = null;
-      }
-    })();
-    return _refreshPromise;
-  },
-  getAuthToken(){
-    return _authToken;
-  },
-  setAuthToken(auth_token){
-    _notifyTokenListeners(auth_token);
-    _setAuthToken(auth_token);
-  },
-  isTokenValid:_isTokenValid,
-  get instance(){
-    if(!_instance){
-      throw new Error('API client not initialized. Call apiClient.init(baseURL) first.');
-    }
-    return _instance;
+async function authorizationCodeToAccessToken(currentUrl, expectedState, code_verifier){
+  if(!config){
+    throw new Error('call: init(issuerUrl, clientId, redirectUri)');
   }
+  tokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
 }
 
-export default apiClient;
+async function clientCredentialFlow(scope, resource){
+  tokenSet = await client.clientCredentialsGrant(config, { scope, resource });
+}
+
+function onTokenUpdate(cb){
+  onUpdateCallback = cb;
+}
+
+function getAccessToken(){
+  return tokenSet?.access_token;
+}
+
+const authClient = {
+  init:init,
+  authorizationCodeFlow:authorizationCodeFlow,
+  clientCredentialFlow:clientCredentialFlow,
+  getAccessToken:getAccessToken,
+  onTokenUpdate:onTokenUpdate,
+  authorizationCodeToAccessToken:authorizationCodeToAccessToken,
+};
+
+export default authClient;
