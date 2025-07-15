@@ -2,7 +2,6 @@ import * as client from 'openid-client';
 
 let config, tokenSet, onUpdateCallback;
 
-//implement logout() and refreshToken()
 //figure out why our letsencrypt cert gets rejected
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
 
@@ -11,20 +10,15 @@ async function init(issuerUrl, clientId, clientSecret = null){
     issuerUrl,
     clientId,
     clientSecret
-    //'$2a$10$4edhPeDnuDHe8APeG6bwz.n5cJUnkNmx39Eo2j.eVGSMHGrGG5Ts2'
-    //[ redirectUri ],
-    //['code'], //this probably needs to be parameterized
   );
 }
 //user interactive sign-in
 async function authorizationCodeFlow(redirectUri, scope) {
   if(!config){
-    throw new Error('call: init(issuerUrl, clientId, redirectUri)');
+    throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
   let codeVerifier = client.randomPKCECodeVerifier();
   let codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
-  console.log('verifier', codeVerifier);
-  //let state;
   let state = client.randomState();
   let parameters = {
     redirectUri,
@@ -39,18 +33,29 @@ async function authorizationCodeFlow(redirectUri, scope) {
     state: state,
     codeVerifier: codeVerifier
   }
-  // return redirectTo.href;
 }
-
 async function authorizationCodeToAccessToken(currentUrl, expectedState, code_verifier){
   if(!config){
     throw new Error('call: init(issuerUrl, clientId, redirectUri)');
   }
   tokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
 }
-
+async function logout(postLogoutUri, idToken){
+  let redirectTo = client.buildEndSessionUrl(config,{
+    post_logout_redirect_uri: postLogoutUri,
+    id_token_hint: idToken
+  });
+  return redirectTo.href
+}
+//Headless App Authentication
 async function clientCredentialFlow(scope, resource){
   tokenSet = await client.clientCredentialsGrant(config, { scope, resource });
+}
+async function refreshToken(refreshToken,scope,resource){
+  tokenSet = await client.refreshTokenGrant(config,refreshToken,{
+    scope,
+    resource
+  });
 }
 
 function onTokenUpdate(cb){
@@ -68,6 +73,8 @@ const authClient = {
   getAccessToken:getAccessToken,
   onTokenUpdate:onTokenUpdate,
   authorizationCodeToAccessToken:authorizationCodeToAccessToken,
+  refreshToken:refreshToken,
+  logout:logout
 };
 
 export default authClient;
