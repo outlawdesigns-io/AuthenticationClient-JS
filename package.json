@@ -1,6 +1,6 @@
 {
   "name": "@outlawdesigns/authenticationclient",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "jose": "^6.0.12",
     "openid-client": "^6.6.2"
   },
   "type": "module"

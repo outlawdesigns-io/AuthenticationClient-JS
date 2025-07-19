@@ -1,16 +1,18 @@
 import * as client from 'openid-client';
+import * as jose from 'jose';
 
-let config, tokenSet, onUpdateCallback;
+let config, tokenSet, onUpdateCallback, issuerUrl, jwks;
 
 //figure out why our letsencrypt cert gets rejected
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
 
-async function init(issuerUrl, clientId, clientSecret = null){
-  config = await client.discovery(
-    issuerUrl,
-    clientId,
-    clientSecret
-  );
+async function init(issuerUrlStr, clientId, clientSecret = null){
+  issuerUrl = new URL(issuerUrlStr);
+  config = await client.discovery(issuerUrl,clientId,clientSecret);
+  const res = await fetch(issuerUrl);
+  const metadata = await res.json();
+  const jwksUri = metadata.jwks_uri;
+  jwks = jose.createRemoteJWKSet(new URL(jwksUri));
 }
 //user interactive sign-in
 async function authorizationCodeFlow(redirectUri, scope) {
@@ -34,7 +36,7 @@ async function authorizationCodeFlow(redirectUri, scope) {
     codeVerifier: codeVerifier
   }
 }
-async function authorizationCodeToAccessToken(currentUrl, expectedState, code_verifier){
+async function completeAuthFlow(currentUrl, expectedState, code_verifier){
   if(!config){
     throw new Error('call: init(issuerUrl, clientId, redirectUri)');
   }
@@ -57,6 +59,19 @@ async function refreshToken(refreshToken,scope,resource){
     resource
   });
 }
+//Server-side token validation
+async function verifyAccessToken(access_token,audience){
+  let result;
+  try{
+    result = await jose.jwtVerify(access_token,jwks,{
+      issuer: issuerUrl.origin,
+      audience: audience
+    });
+  }catch(err){
+    throw err;
+  }
+  return result.payload;
+}
 
 function onTokenUpdate(cb){
   onUpdateCallback = cb;
@@ -65,16 +80,22 @@ function onTokenUpdate(cb){
 function getAccessToken(){
   return tokenSet?.access_token;
 }
+function getIdToken(){
+  return tokenSet?.id_token;
+}
 
 const authClient = {
   init:init,
   authorizationCodeFlow:authorizationCodeFlow,
   clientCredentialFlow:clientCredentialFlow,
   getAccessToken:getAccessToken,
+  getIdToken:getIdToken,
   onTokenUpdate:onTokenUpdate,
-  authorizationCodeToAccessToken:authorizationCodeToAccessToken,
+  completeAuthFlow:completeAuthFlow,
   refreshToken:refreshToken,
-  logout:logout
+  logout:logout,
+  verifyAccessToken:verifyAccessToken,
+
 };
 
 export default authClient;
