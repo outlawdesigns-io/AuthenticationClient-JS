@@ -38,14 +38,17 @@ async function authorizationCodeFlow(redirectUri, scope) {
 }
 async function completeAuthFlow(currentUrl, expectedState, code_verifier){
   if(!config){
-    throw new Error('call: init(issuerUrl, clientId, redirectUri)');
+    throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
   tokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
 }
-async function logout(postLogoutUri, idToken){
+async function logout(postLogoutUri){
+  if(!tokenSet.id_token){
+    throw new Error('Unable to logout. No id_token available');
+  }
   let redirectTo = client.buildEndSessionUrl(config,{
     post_logout_redirect_uri: postLogoutUri,
-    id_token_hint: idToken
+    id_token_hint: tokenSet.id_token
   });
   return redirectTo.href
 }
@@ -53,8 +56,11 @@ async function logout(postLogoutUri, idToken){
 async function clientCredentialFlow(scope, resource){
   tokenSet = await client.clientCredentialsGrant(config, { scope, resource });
 }
-async function refreshToken(refreshToken,scope,resource){
-  tokenSet = await client.refreshTokenGrant(config,refreshToken,{
+async function refreshToken(scope,resource){
+  if(!tokenSet.refresh_token){
+    throw new Error('No refresh_token available');
+  }
+  tokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,{
     scope,
     resource
   });
@@ -78,24 +84,28 @@ function onTokenUpdate(cb){
 }
 
 function getAccessToken(){
+  console.log(tokenSet);
   return tokenSet?.access_token;
 }
 function getIdToken(){
   return tokenSet?.id_token;
+}
+function getRefreshToken(){
+  return tokenSet?.refresh_token;
 }
 
 const authClient = {
   init:init,
   authorizationCodeFlow:authorizationCodeFlow,
   clientCredentialFlow:clientCredentialFlow,
-  getAccessToken:getAccessToken,
-  getIdToken:getIdToken,
   onTokenUpdate:onTokenUpdate,
   completeAuthFlow:completeAuthFlow,
   refreshToken:refreshToken,
   logout:logout,
   verifyAccessToken:verifyAccessToken,
-
+  getRefreshToken:getRefreshToken,
+  getAccessToken:getAccessToken,
+  getIdToken:getIdToken
 };
 
 export default authClient;
