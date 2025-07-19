@@ -84,7 +84,6 @@ function onTokenUpdate(cb){
 }
 
 function getAccessToken(){
-  console.log(tokenSet);
   return tokenSet?.access_token;
 }
 function getIdToken(){
@@ -92,6 +91,12 @@ function getIdToken(){
 }
 function getRefreshToken(){
   return tokenSet?.refresh_token;
+}
+function setTokenSet(newTokenSet){
+  tokenSet = newTokenSet;
+}
+function getTokenSet(){
+  return tokenSet;
 }
 
 const authClient = {
@@ -103,9 +108,11 @@ const authClient = {
   refreshToken:refreshToken,
   logout:logout,
   verifyAccessToken:verifyAccessToken,
+  getTokenSet:getTokenSet,
   getRefreshToken:getRefreshToken,
   getAccessToken:getAccessToken,
-  getIdToken:getIdToken
+  getIdToken:getIdToken,
+  setTokenSet:setTokenSet
 };
 
 export default authClient;
