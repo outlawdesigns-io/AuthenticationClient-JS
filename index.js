@@ -15,7 +15,7 @@ async function init(issuerUrlStr, clientId, clientSecret = null){
   jwks = jose.createRemoteJWKSet(new URL(jwksUri));
 }
 //user interactive sign-in
-async function authorizationCodeFlow(redirectUri, scope) {
+async function authorizationCodeFlow(redirectUri, scope, resource) {
   if(!config){
     throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
@@ -23,8 +23,9 @@ async function authorizationCodeFlow(redirectUri, scope) {
   let codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
   let state = client.randomState();
   let parameters = {
-    redirectUri,
+    redirect_uri:redirectUri,
     scope,
+    audience: resource,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     state: state
