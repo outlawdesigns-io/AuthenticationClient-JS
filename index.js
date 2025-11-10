@@ -1,121 +1,119 @@
-import axios from 'axios';
+import * as client from 'openid-client';
+import * as jose from 'jose';
 
-let _instance = null;
-let _authToken = null;
-let _baseUrl = null;
-let _refreshInProgress = false;
-let _refreshPromise = null;
-const _tokenListeners = new Set();
+let config, tokenSet, onUpdateCallback, issuerUrl, jwks;
 
-function _createInstance(baseURL){
-  const client = axios.create({ baseURL:baseURL });
-  if(_authToken){
-    client.defaults.headers.common['auth_token'] = _authToken;
-  }
-  return client;
-}
-function _setAuthToken(token){
-  _authToken = token;
-  if(_instance){
-    _instance.defaults.headers.common['auth_token'] = _authToken;
-  }
-}
-async function _authenticate(username,password){
-  if(!username || !password){
-    throw new Error('Cannot authenticate without credentials.');
-  }
-  if(!_instance) throw new Error('API client not instantiated with baseURL.');
-  const headers = {'request_token':username, 'password':password};
-  const response = await _instance.get('/authenticate',{headers:headers});
-  if(response.status == 200 && !response.data.error){
-    _setAuthToken(response.data.token);
-    _notifyTokenListeners(response.data.token);
-    return response.data.token;
-  }
-  throw response.data;
-}
-async function _isTokenValid(auth_token){
-  if (!_instance) throw new Error('API client not instantiated with baseURL.');
-  _setAuthToken(auth_token);
-  const response = await _instance.get('/verify');
-  if(response.status == 200 && !response.data.error){
-    return true;
-  }else if(response.status == 200 && response.data.error && (response.data.error.includes('Invalid Token') || response.data.error.includes('Token Expired'))){
-    return false;
-  }
-  throw response.data;
-}
-function _notifyTokenListeners(token){
-  for(const cb of _tokenListeners){
-    try{
-      cb(token);
-    }catch(err){
-      console.warn('Error in token listener:',err);
-    }
-  }
-}
+//figure out why our letsencrypt cert gets rejected
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
 
-
-const apiClient = {
-  init(baseURL = process.env.OD_ACCOUNTS_BASE_URL){
-    if(_baseUrl && baseURL !== _baseUrl){
-      throw new Error(`API client already initialized with ${_baseUrl}`);
-    }
-    if(!baseURL){
-      throw new Error('API client cannot be initialized without baseURL');
-    }
-    if(!_instance){
-      _baseUrl = baseURL;
-      _instance = _createInstance(_baseUrl);
-    }
-  },
-  onTokenUpdate(callback){
-    _tokenListeners.add(callback);
-    if(_authToken) callback(_authToken);
-    return () => _tokenListeners.delete(callback); //allow unsubscription
-  },
-  async authenticate(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    return await _authenticate(username,password);
-  },
-  async checkToken(auth_token,username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    const validToken = await _isTokenValid(auth_token);
-    if(!validToken){
-      return await _authenticate(username,password);
-    }
-    return auth_token;
-  },
-  async refreshToken(username = process.env.OD_ACCOUNTS_USER,password = process.env.OD_ACCOUNTS_PASS){
-    if(_refreshInProgress){
-      return _refreshPromise;
-    }
-    _refreshInProgress = true;
-    _refreshPromise = (async ()=> {
-      try{
-        let newToken = await _authenticate(username,password);
-        _authToken = newToken;
-        _notifyTokenListeners(_authToken);
-        return _authToken;
-      }finally{
-        _refreshInProgress = false;
-        _refreshPromise = null;
-      }
-    })();
-    return _refreshPromise;
-  },
-  getAuthToken(){
-    return _authToken;
-  },
-  setAuthToken(auth_token){
-    _notifyTokenListeners(auth_token);
-    _setAuthToken(auth_token);
-  },
-  isTokenValid:_isTokenValid,
-  get instance(){
-    if(!_instance){
-      throw new Error('API client not initialized. Call apiClient.init(baseURL) first.');
-    }
-    return _instance;
+async function init(issuerUrlStr, clientId, clientSecret = null){
+  issuerUrl = new URL(issuerUrlStr);
+  config = await client.discovery(issuerUrl,clientId,clientSecret);
+  const res = await fetch(issuerUrl);
+  const metadata = await res.json();
+  const jwksUri = metadata.jwks_uri;
+  jwks = jose.createRemoteJWKSet(new URL(jwksUri));
+}
+//user interactive sign-in
+async function authorizationCodeFlow(redirectUri, scope, resource) {
+  if(!config){
+    throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
+  let codeVerifier = client.randomPKCECodeVerifier();
+  let codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
+  let state = client.randomState();
+  let parameters = {
+    redirect_uri:redirectUri,
+    scope,
+    audience: resource,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state: state
+  }
+  let redirectTo = client.buildAuthorizationUrl(config,parameters);
+  return {
+    redirectUri: redirectTo.href,
+    state: state,
+    codeVerifier: codeVerifier
+  }
+}
+async function completeAuthFlow(currentUrl, expectedState, code_verifier){
+  if(!config){
+    throw new Error('call: init(issuerUrl, clientId, [secret])');
+  }
+  tokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
+}
+async function logout(postLogoutUri){
+  if(!tokenSet.id_token){
+    throw new Error('Unable to logout. No id_token available');
+  }
+  let redirectTo = client.buildEndSessionUrl(config,{
+    post_logout_redirect_uri: postLogoutUri,
+    id_token_hint: tokenSet.id_token
+  });
+  return redirectTo.href
+}
+//Headless App Authentication
+async function clientCredentialFlow(scope, resource){
+  tokenSet = await client.clientCredentialsGrant(config, { scope, resource });
+}
+async function refreshToken(scope,resource){
+  if(!tokenSet.refresh_token){
+    throw new Error('No refresh_token available');
+  }
+  tokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,{
+    scope,
+    resource
+  });
+}
+//Server-side token validation
+async function verifyAccessToken(access_token,audience){
+  let result;
+  try{
+    result = await jose.jwtVerify(access_token,jwks,{
+      issuer: issuerUrl.origin,
+      audience: audience
+    });
+  }catch(err){
+    throw err;
+  }
+  return result.payload;
 }
 
-export default apiClient;
+function onTokenUpdate(cb){
+  onUpdateCallback = cb;
+}
+
+function getAccessToken(){
+  return tokenSet?.access_token;
+}
+function getIdToken(){
+  return tokenSet?.id_token;
+}
+function getRefreshToken(){
+  return tokenSet?.refresh_token;
+}
+function setTokenSet(newTokenSet){
+  tokenSet = newTokenSet;
+}
+function getTokenSet(){
+  return tokenSet;
+}
+
+const authClient = {
+  init:init,
+  authorizationCodeFlow:authorizationCodeFlow,
+  clientCredentialFlow:clientCredentialFlow,
+  onTokenUpdate:onTokenUpdate,
+  completeAuthFlow:completeAuthFlow,
+  refreshToken:refreshToken,
+  logout:logout,
+  verifyAccessToken:verifyAccessToken,
+  getTokenSet:getTokenSet,
+  getRefreshToken:getRefreshToken,
+  getAccessToken:getAccessToken,
+  getIdToken:getIdToken,
+  setTokenSet:setTokenSet
+};
+
+export default authClient;
