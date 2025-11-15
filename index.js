@@ -7,6 +7,7 @@ let config, tokenSet, onUpdateCallback, issuerUrl, jwks;
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
 
 async function init(issuerUrlStr, clientId, clientSecret = null){
+  console.log('custom init hit!');
   issuerUrl = new URL(issuerUrlStr);
   config = await client.discovery(issuerUrl,clientId,clientSecret);
   const res = await fetch(issuerUrl);
@@ -15,20 +16,22 @@ async function init(issuerUrlStr, clientId, clientSecret = null){
   jwks = jose.createRemoteJWKSet(new URL(jwksUri));
 }
 //user interactive sign-in
-async function authorizationCodeFlow(redirectUri, scope, resource) {
+async function authorizationCodeFlow(redirectUri, scope, resources = []) {
   if(!config){
     throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
   let codeVerifier = client.randomPKCECodeVerifier();
   let codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
   let state = client.randomState();
-  let parameters = {
+  let parameters = new URLSearchParams({
     redirect_uri:redirectUri,
     scope,
-    audience: resource,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     state: state
+  });
+  if(resources.length){
+    resources.map(r => parameters.append('audience', r));
   }
   let redirectTo = client.buildAuthorizationUrl(config,parameters);
   return {
@@ -54,26 +57,32 @@ async function logout(postLogoutUri){
   return redirectTo.href
 }
 //Headless App Authentication
-async function clientCredentialFlow(scope, resource){
-  tokenSet = await client.clientCredentialsGrant(config, { scope, resource });
+async function clientCredentialFlow(scope, resources = []){
+  let parameters = new URLSearchParams({ scope });
+  if(resources.length){
+    resources.map(r => parameters.append('audience',r));
+  }
+  tokenSet = await client.clientCredentialsGrant(config, parameters);
 }
-async function refreshToken(scope,resource){
+async function refreshToken(scope,resources = []){
   if(!tokenSet.refresh_token){
     throw new Error('No refresh_token available');
   }
-  tokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,{
-    scope,
-    resource
-  });
+  let parameters = new URLSearchParams({ scope });
+  if(resources.length){
+    resources.map(r => parameters.append('audience',r));
+  }
+  tokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,parameters);
 }
 //Server-side token validation
-async function verifyAccessToken(access_token,audience){
+async function verifyAccessToken(access_token,audience = []){
   let result;
+  let parameters = new URLSearchParams({issuer: issuerUrl.origin});
+  if(audience.length){
+    audience.map(r => parameters.append('audience',r));
+  }
   try{
-    result = await jose.jwtVerify(access_token,jwks,{
-      issuer: issuerUrl.origin,
-      audience: audience
-    });
+    result = await jose.jwtVerify(access_token,jwks,parameters);
   }catch(err){
     throw err;
   }

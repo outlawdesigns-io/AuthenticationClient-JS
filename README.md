@@ -43,7 +43,7 @@ await authClient.init('https://your-issuer.com', 'client_id', 'client_secret');
 const { redirectUri, state, codeVerifier } = await authClient.authorizationCodeFlow(
   'https://your-app.com/callback',
   'openid profile email',
-  'https://your-api.com'
+  ['https://your-api.com']
 );
 // Redirect the user to `redirectUri`
 ```
@@ -61,7 +61,9 @@ await authClient.completeAuthFlow(window.location.href, state, codeVerifier);
 ### 3. Client Credentials Flow (Headless)
 
 ```js
-await authClient.clientCredentialFlow('read:data', 'https://your-api.com');
+let scope = 'read:data';
+let audience = ['https://your-api.com'];
+await authClient.clientCredentialFlow(scope, audience);
 ```
 
 ---
@@ -69,7 +71,9 @@ await authClient.clientCredentialFlow('read:data', 'https://your-api.com');
 ### 4. Refresh Token
 
 ```js
-await authClient.refreshToken('openid profile email', 'https://your-api.com');
+let scope = 'openid profile email'
+let audience = ['https://your-api.com']
+await authClient.refreshToken(scope, audience);
 ```
 
 ---
@@ -99,7 +103,8 @@ authClient.setTokenSet(ts);    // replace tokenSet
 ### 7. Verify Access Token (Server-side)
 
 ```js
-const payload = await authClient.verifyAccessToken(accessToken, 'https://your-api.com');
+const audience = ['https://your-api.com'];
+const payload = await authClient.verifyAccessToken(accessToken, audience);
 ```
 
 ---
