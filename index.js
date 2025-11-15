@@ -7,7 +7,6 @@ let config, tokenSet, onUpdateCallback, issuerUrl, jwks;
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED=0;
 
 async function init(issuerUrlStr, clientId, clientSecret = null){
-  console.log('custom init hit!');
   issuerUrl = new URL(issuerUrlStr);
   config = await client.discovery(issuerUrl,clientId,clientSecret);
   const res = await fetch(issuerUrl);
