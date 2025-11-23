@@ -43,7 +43,8 @@ async function completeAuthFlow(currentUrl, expectedState, code_verifier){
   if(!config){
     throw new Error('call: init(issuerUrl, clientId, [secret])');
   }
-  tokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
+  let newTokenSet = await client.authorizationCodeGrant(config,currentUrl,{pkceCodeVerifier: code_verifier, expectedState: expectedState});
+  setTokenSet(newTokenSet);
 }
 async function logout(postLogoutUri){
   if(!tokenSet.id_token){
@@ -61,7 +62,8 @@ async function clientCredentialFlow(scope, resources = []){
   if(resources.length){
     resources.map(r => parameters.append('audience',r));
   }
-  tokenSet = await client.clientCredentialsGrant(config, parameters);
+  let newTokenSet = await client.clientCredentialsGrant(config, parameters);
+  setTokenSet(newTokenSet);
 }
 async function refreshToken(scope,resources = []){
   if(!tokenSet.refresh_token){
@@ -71,7 +73,8 @@ async function refreshToken(scope,resources = []){
   if(resources.length){
     resources.map(r => parameters.append('audience',r));
   }
-  tokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,parameters);
+  let newTokenSet = await client.refreshTokenGrant(config,tokenSet.refresh_token,parameters);
+  setTokenSet(newTokenSet);
 }
 //Server-side token validation
 async function verifyAccessToken(access_token,audience = []){
@@ -103,6 +106,7 @@ function getRefreshToken(){
 }
 function setTokenSet(newTokenSet){
   tokenSet = newTokenSet;
+  onUpdateCallback(tokenSet);
 }
 function getTokenSet(){
   return tokenSet;
